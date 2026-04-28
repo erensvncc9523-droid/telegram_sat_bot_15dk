@@ -1,0 +1,36 @@
+Railway Genel Kurulum
+
+Bu repo Railway'de cron job olarak calisacak:
+
+Telegram SAT botu
+- Cron: */15 * * * *
+- Script: telegram_sat_bot.py --once
+
+Start Command:
+- python telegram_sat_bot.py --once
+
+Variables:
+- TELEGRAM_BOT_TOKEN=...
+- TELEGRAM_CHAT_ID=...
+- SYMBOLS=GENTS,ONCSM
+- SEND_BUY_MESSAGES=false
+- SEND_SELL_MESSAGES=true
+- SEND_SCAN_SUMMARY=false
+- SEND_SIGNAL_MESSAGE_SEPARATELY=true
+- BOT_DATA_DIR=/data
+
+GitHub'a yuklenecek temel dosyalar:
+- railway.toml
+- telegram_sat_bot.py
+- tarama.py
+- requirements.txt
+- .python-version
+- .env.example
+- .gitignore
+
+Onemli:
+- Railway cron UTC ile calisir.
+- Turkiye saati UTC+3 kabul edilir.
+- SYMBOLS bos birakilirsa tum liste taranir.
+- Ayni SAT sinyali tekrar tekrar gitmesin diye Railway Volume ekle ve mount path olarak /data kullan.
+- railway.toml icindeki cronSchedule zaten 15 dakikaya ayarlidir.

@@ -1,0 +1,35 @@
+Railway 15 Dakikalik SAT Botu
+
+Amac:
+- Her 15 dakikada bir SAT kontrolu calissin.
+- Sonucu Telegram grubuna gondersin.
+- Railway cron her calistirdiginda bot bir kez tarar ve kapanir.
+
+Railway service:
+- GitHub reposundan Railway service olustur.
+- Start Command bos kalabilir; railway.toml su komutu calistirir:
+  python telegram_sat_bot.py --once
+
+Variables:
+- TELEGRAM_BOT_TOKEN=...
+- TELEGRAM_CHAT_ID=...
+- SYMBOLS=GENTS,ONCSM
+- SEND_BUY_MESSAGES=false
+- SEND_SELL_MESSAGES=true
+- SEND_SCAN_SUMMARY=false
+- SEND_SIGNAL_MESSAGE_SEPARATELY=true
+- BOT_DATA_DIR=/data
+
+Cron Schedule:
+- */15 * * * *
+
+Not:
+- Railway UTC kullanir.
+- */15 * * * * her 15 dakikada bir calisir.
+- Sadece hafta ici piyasa saatlerinde calissin istersen Cron Schedule yerine sunu kullan:
+  */15 7-15 * * 1-5
+
+Kalici durum:
+- Ayni SAT tekrar tekrar gitmesin istiyorsan Railway Volume ekle.
+- Volume mount path: /data
+- BOT_DATA_DIR=/data olarak kalsin.

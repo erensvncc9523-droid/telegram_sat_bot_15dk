@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+telegram_bot_config.json
+telegram_bot_state.json
+telegram_sat_bot.log
+daily_scan_telegram.log
+*.xlsx
