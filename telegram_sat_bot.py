@@ -364,7 +364,61 @@ def price_change_text(result: StrategyResult) -> str:
 
 
 def no_signal_text(symbol: str, result: StrategyResult) -> str:
-    return f"{symbol}: Sinyal yok | {price_change_text(result)}"
+    return "\n".join(
+        [
+            "--------------------",
+            f"📌 Hisse: {symbol}",
+            "⚪ Durum: Sinyal yok",
+            f"💰 {price_change_text(result)}",
+        ]
+    )
+
+
+def signal_emoji(event_name: str, event_kind: str) -> str:
+    if event_kind == "BUY":
+        return "🟢"
+    if "STOP" in event_name.upper():
+        return "🛑"
+    return "🔴"
+
+
+def format_signal_message(symbol: str, event_name: str, event: Event, result: StrategyResult) -> str:
+    return "\n".join(
+        [
+            f"{signal_emoji(event_name, event.kind)} {event_name} SİNYALİ",
+            "",
+            "--------------------",
+            f"📌 Hisse: {symbol}",
+            f"💰 Sinyal Fiyatı: {event.price:.2f}",
+            f"📊 Son Durum: {price_change_text(result)}",
+            f"🕒 Sinyal Zamanı: {event.timestamp.strftime('%Y-%m-%d %H:%M')}",
+            "🧭 Strateji: Günlük AL + günlük SAT",
+            "--------------------",
+        ]
+    )
+
+
+def format_signal_summary_line(symbol: str, event_name: str, event: Event, result: StrategyResult) -> str:
+    return "\n".join(
+        [
+            "--------------------",
+            f"{signal_emoji(event_name, event.kind)} Hisse: {symbol}",
+            f"📣 Sinyal: {event_name}",
+            f"💰 Sinyal Fiyatı: {event.price:.2f}",
+            f"📊 {price_change_text(result)}",
+            f"🕒 Zaman: {event.timestamp.strftime('%Y-%m-%d %H:%M')}",
+        ]
+    )
+
+
+def format_error_summary_line(symbol: str) -> str:
+    return "\n".join(
+        [
+            "--------------------",
+            f"📌 Hisse: {symbol}",
+            "⚠️ Durum: Hata",
+        ]
+    )
 
 
 def scan_once(config: dict, state: dict) -> int:
@@ -374,11 +428,23 @@ def scan_once(config: dict, state: dict) -> int:
         log_error("telegram_bot_config.json icindeki token/chat_id alanlarini doldurun.")
         return 0
 
+    log_info(
+        "Mesaj ayarlari: "
+        f"BUY={config.get('send_buy_messages', False)}, "
+        f"SELL={config.get('send_sell_messages', True)}, "
+        f"OZET={config.get('send_scan_summary', True)}, "
+        f"TEKIL={config.get('send_signal_message_separately', False)}"
+    )
+
     sent_events = state.setdefault("sent_events", {})
     closed_symbols = set(state.setdefault("closed_symbols", []))
     messages_sent = 0
     scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    summary_lines = [f"Tarama yapildi: {scan_time}"]
+    summary_lines = [
+        "📡 Telegram SAT Botu",
+        "",
+        f"🕒 Tarama zamanı: {scan_time}",
+    ]
 
     symbols = config["symbols"]
     if isinstance(symbols, str):
@@ -413,27 +479,29 @@ def scan_once(config: dict, state: dict) -> int:
                 summary_lines.append(no_signal_text(symbol, result))
                 continue
 
-            sent_events[event_key] = scan_time
-            if config.get("send_signal_message_separately", False):
-                message = (
-                    f"{event_name} sinyali\n"
-                    f"Hisse: {symbol}\n"
-                    f"Fiyat: {latest_event.price:.2f}\n"
-                    f"Son: {price_change_text(result)}\n"
-                    f"Zaman: {latest_event.timestamp.strftime('%Y-%m-%d %H:%M')}\n"
-                    f"Not: Gunluk AL + gunluk SAT stratejisi"
+            can_send_separate_signal = config.get("send_signal_message_separately", False)
+            can_send_summary = config.get("send_scan_summary", True)
+            if not can_send_separate_signal and not can_send_summary:
+                log_info(
+                    f"{symbol}: gonderilecek {event_name} var ama "
+                    "SEND_SIGNAL_MESSAGE_SEPARATELY=false ve SEND_SCAN_SUMMARY=false"
                 )
+                continue
+
+            sent_events[event_key] = scan_time
+            if can_send_separate_signal:
+                message = format_signal_message(symbol, event_name, latest_event, result)
                 send_telegram_message(bot_token, chat_id, message)
                 messages_sent += 1
                 log_info(f"Mesaj gonderildi: {symbol} {event_name} {latest_event.timestamp}")
             if latest_event.kind == "SELL":
-                summary_lines.append(f"{symbol}: {event_name} | {price_change_text(result)}")
+                summary_lines.append(format_signal_summary_line(symbol, event_name, latest_event, result))
                 closed_symbols.add(symbol)
             else:
                 summary_lines.append(no_signal_text(symbol, result))
         except Exception as exc:
             log_error(f"{symbol} icin hata: {exc}")
-            summary_lines.append(f"{symbol}: Hata")
+            summary_lines.append(format_error_summary_line(symbol))
 
     state["closed_symbols"] = sorted(closed_symbols)
     if config.get("send_scan_summary", True):
@@ -447,6 +515,8 @@ def scan_once(config: dict, state: dict) -> int:
 
     state["last_scan"] = scan_time
     save_state(state)
+    if messages_sent == 0:
+        log_info("Telegram mesaji gonderilmedi: yeni gonderilecek SELL yok veya mesaj/ozet ayarlari kapali.")
     log_info(f"Tarama tamamlandi. Gonderilen mesaj: {messages_sent}")
     return messages_sent
 
