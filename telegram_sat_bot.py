@@ -11,6 +11,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,9 @@ STATE_PATH = DATA_DIR / "telegram_bot_state.json"
 LOG_PATH = DATA_DIR / "telegram_sat_bot.log"
 NETWORK_RETRY_COUNT = 3
 NETWORK_RETRY_DELAY_SECONDS = 10
+RUN_WINDOW_TZ = "Europe/Istanbul"
+RUN_WINDOW_START = "10:15"
+RUN_WINDOW_END = "18:30"
 
 DEFAULT_CONFIG = {
     "telegram_bot_token": "BURAYA_BOT_TOKEN",
@@ -83,6 +87,21 @@ def parse_int(value: object, default: int) -> int:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def parse_hhmm(value: str) -> tuple[int, int]:
+    hour_text, minute_text = value.strip().split(":", 1)
+    return int(hour_text), int(minute_text)
+
+
+def is_within_run_window(now: datetime | None = None) -> bool:
+    now = now or datetime.now(ZoneInfo(RUN_WINDOW_TZ))
+    start_hour, start_minute = parse_hhmm(os.getenv("RUN_WINDOW_START", RUN_WINDOW_START))
+    end_hour, end_minute = parse_hhmm(os.getenv("RUN_WINDOW_END", RUN_WINDOW_END))
+    current_minutes = now.hour * 60 + now.minute
+    start_minutes = start_hour * 60 + start_minute
+    end_minutes = end_hour * 60 + end_minute
+    return start_minutes <= current_minutes <= end_minutes
 
 
 def apply_env_overrides(config: dict) -> dict:
@@ -525,6 +544,10 @@ def main() -> None:
     configure_logging()
     try:
         print("Telegram SAT botu hazirlaniyor...", flush=True)
+        if os.getenv("RAILWAY_ENVIRONMENT") and not is_within_run_window():
+            now = datetime.now(ZoneInfo(RUN_WINDOW_TZ)).strftime("%Y-%m-%d %H:%M")
+            log_info(f"Calisma saati disinda: {now}. Tarama yapilmadan cikiliyor.")
+            return
         config = ensure_config()
         state = load_state()
         bot_token = config["telegram_bot_token"].strip()
