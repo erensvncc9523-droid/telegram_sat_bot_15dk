@@ -458,7 +458,7 @@ def scan_once(config: dict, state: dict) -> int:
     sent_events = state.setdefault("sent_events", {})
     closed_symbols = set(state.setdefault("closed_symbols", []))
     messages_sent = 0
-    scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    scan_time = datetime.now(ZoneInfo(RUN_WINDOW_TZ)).strftime("%Y-%m-%d %H:%M:%S")
     summary_lines = [
         "📡 Telegram SAT Botu",
         "",
