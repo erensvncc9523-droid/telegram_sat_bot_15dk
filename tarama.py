@@ -37,6 +37,7 @@ PERIOD_HTF  = "2y"
 DATA_SOURCE = "tradingview"  # tradingview veya yfinance
 ALLOW_DATA_FALLBACK = True
 TV_EXCHANGE = "BIST"
+LAST_DATA_SOURCE_ERROR = ""
 MED_LEN     = 3
 RSI_LEN     = 14
 STOCH_LEN   = 14
@@ -252,6 +253,8 @@ def veri_cek_tradingview(ticker, period, interval):
     return normalize_ohlcv(df)
 
 def veri_cek_kaynakli(ticker, period, interval):
+    global LAST_DATA_SOURCE_ERROR
+    LAST_DATA_SOURCE_ERROR = ""
     sources = [DATA_SOURCE]
     fallback = "yfinance" if DATA_SOURCE == "tradingview" else "tradingview"
     if ALLOW_DATA_FALLBACK and fallback not in sources:
@@ -267,9 +270,14 @@ def veri_cek_kaynakli(ticker, period, interval):
                 df = None
             if df is not None and len(df) > 0:
                 return df, source
+            LAST_DATA_SOURCE_ERROR = f"{source}: veri yok"
         except Exception:
+            LAST_DATA_SOURCE_ERROR = f"{source}: hata"
             continue
     return None, ""
+
+def son_veri_kaynagi_hatasi():
+    return LAST_DATA_SOURCE_ERROR
 
 def veri_cek(ticker, period, interval):
     df, _ = veri_cek_kaynakli(ticker, period, interval)
