@@ -15,10 +15,8 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
-
 # Reuse the BIST list and daily signal logic from the existing scanner.
-from tarama import BIST_HISSELER, sinyal_hesapla
+from tarama import BIST_HISSELER, sinyal_hesapla, veri_cek_kaynakli
 
 
 def get_data_dir() -> Path:
@@ -160,6 +158,7 @@ class StrategyResult:
     events: list[Event]
     last_price: float | None
     change_pct: float | None
+    data_source: str = ""
 
 
 def configure_logging() -> None:
@@ -299,25 +298,23 @@ def crossover_window(series_a: pd.Series, series_b: pd.Series, lookback: int) ->
     return crossover(series_a, series_b).rolling(lookback).max().fillna(0).astype(bool)
 
 
-def download_ohlcv(ticker: str, period: str, interval: str) -> pd.DataFrame | None:
+def download_ohlcv(ticker: str, period: str, interval: str) -> tuple[pd.DataFrame | None, str]:
     last_error = None
     for attempt in range(1, NETWORK_RETRY_COUNT + 1):
         try:
-            df = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
+            df, data_source = veri_cek_kaynakli(ticker, period, interval)
             if df is None or df.empty:
-                return None
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+                return None, ""
             if getattr(df.index, "tz", None) is not None:
                 df.index = df.index.tz_convert(None)
-            return df.dropna(subset=["Open", "High", "Low", "Close"])
+            return df.dropna(subset=["Open", "High", "Low", "Close"]), data_source
         except Exception as exc:
             last_error = exc
             if attempt < NETWORK_RETRY_COUNT:
                 time.sleep(NETWORK_RETRY_DELAY_SECONDS)
     if last_error is not None:
         raise last_error
-    return None
+    return None, ""
 
 
 def ensure_series(data: pd.Series | pd.DataFrame) -> pd.Series:
@@ -355,9 +352,9 @@ def compute_daily_strategy_events(df: pd.DataFrame) -> list[Event]:
 
 def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
     ticker = f"{symbol}.IS"
-    daily_df = download_ohlcv(ticker, f"{config['history_days_daily']}d", config["buy_timeframe"])
+    daily_df, data_source = download_ohlcv(ticker, f"{config['history_days_daily']}d", config["buy_timeframe"])
     if daily_df is None:
-        return StrategyResult(events=[], last_price=None, change_pct=None)
+        return StrategyResult(events=[], last_price=None, change_pct=None, data_source=data_source)
     last_price, change_pct = latest_price_change(daily_df)
     merged = compute_daily_strategy_events(daily_df)
 
@@ -370,7 +367,7 @@ def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
         elif event.kind == "SELL" and in_position:
             filtered.append(event)
             in_position = False
-    return StrategyResult(events=filtered, last_price=last_price, change_pct=change_pct)
+    return StrategyResult(events=filtered, last_price=last_price, change_pct=change_pct, data_source=data_source)
 
 
 def price_change_text(result: StrategyResult) -> str:
@@ -389,6 +386,7 @@ def no_signal_text(symbol: str, result: StrategyResult) -> str:
             f"📌 Hisse: {symbol}",
             "⚪ Durum: Sinyal yok",
             f"💰 {price_change_text(result)}",
+            f"Veri: {result.data_source or 'yok'}",
         ]
     )
 
@@ -411,6 +409,7 @@ def format_signal_message(symbol: str, event_name: str, event: Event, result: St
             f"💰 Sinyal Fiyatı: {event.price:.2f}",
             f"📊 Son Durum: {price_change_text(result)}",
             f"🕒 Sinyal Zamanı: {event.timestamp.strftime('%Y-%m-%d %H:%M')}",
+            f"Veri: {result.data_source or 'yok'}",
             "🧭 Strateji: Günlük AL + günlük SAT",
             "--------------------",
         ]
@@ -426,6 +425,7 @@ def format_signal_summary_line(symbol: str, event_name: str, event: Event, resul
             f"💰 Sinyal Fiyatı: {event.price:.2f}",
             f"📊 {price_change_text(result)}",
             f"🕒 Zaman: {event.timestamp.strftime('%Y-%m-%d %H:%M')}",
+            f"Veri: {result.data_source or 'yok'}",
         ]
     )
 

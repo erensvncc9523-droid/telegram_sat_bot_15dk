@@ -20,7 +20,13 @@ import logging
 warnings.filterwarnings("ignore")
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
-SCRIPT_VERSION = "tarama.py 2026-04-28 ESv2"
+try:
+    from tvDatafeed import TvDatafeed, Interval
+except ImportError:
+    TvDatafeed = None
+    Interval = None
+
+SCRIPT_VERSION = "tarama.py 2026-04-29 ESv2"
 
 # ─────────────────────────────────────────────
 # PARAMETRELER
@@ -28,6 +34,9 @@ SCRIPT_VERSION = "tarama.py 2026-04-28 ESv2"
 INTERVAL    = "1d"     # Günlük periyot
 PERIOD_1D   = "2y"     # EMA/MA ve pozisyon akisi icin yeterli gecmis
 PERIOD_HTF  = "2y"
+DATA_SOURCE = "tradingview"  # tradingview veya yfinance
+ALLOW_DATA_FALLBACK = True
+TV_EXCHANGE = "BIST"
 MED_LEN     = 3
 RSI_LEN     = 14
 STOCH_LEN   = 14
@@ -44,13 +53,16 @@ PROFIT_TRIGGER_PCT = 15.0
 PULLBACK_PCT = 5.0
 MA_TREND_LEN = 50
 MA_SLOPE_BARS = 5
-MIN_MA_SLOPE_PCT = 0.5
+MIN_MA_SLOPE_PCT = 0.2
+MIN_VOLUME_ABOVE_AVG_PCT = 12.0
+ADX_LEN = 14
+ADX_SLOPE_BARS = 5
+MIN_ADX_RISE_PCT = 1.2
 
 USE_HTF     = False    # Varsayılan OFF
-USE_VOLUME  = False    # Varsayılan OFF
+USE_VOLUME_ABOVE_AVG = True
 USE_TREND   = True     # MA50 slope-only filtresi
-USE_PRICE_ABOVE_MA = True
-
+USE_ADX     = True
 # ─────────────────────────────────────────────
 # BIST HİSSE LİSTESİ
 # ─────────────────────────────────────────────
@@ -126,6 +138,26 @@ def ema(series, length):
 def sma(series, length):
     return series.rolling(window=length).mean()
 
+def rma(series, length):
+    return series.ewm(alpha=1.0 / length, adjust=False).mean()
+
+def adx_calc(high, low, close, length):
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
+
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    atr = rma(true_range, length)
+    plus_di = 100.0 * rma(plus_dm, length) / atr
+    minus_di = 100.0 * rma(minus_dm, length) / atr
+    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    return rma(dx.replace([np.inf, -np.inf], np.nan), length)
+
 def rsi_calc(close, length):
     delta    = close.diff()
     gain     = delta.clip(lower=0)
@@ -160,13 +192,87 @@ def buy_grade_text(grade):
         return "ZAYIF AL"
     return "AL"
 
-def veri_cek(ticker, period, interval):
-    df = yf.download(ticker, period=period, interval=interval,
-                     progress=False, auto_adjust=True)
+TV_CLIENT = None
+
+def normalize_ohlcv(df):
     if df is None or len(df) == 0:
         return None
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    rename_map = {col: str(col).title() for col in df.columns}
+    df = df.rename(columns=rename_map)
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    if not all(col in df.columns for col in required):
+        return None
+    return df[required].dropna(subset=["High", "Low", "Close"])
+
+def period_to_bars(period):
+    if period.endswith("y"):
+        return int(period[:-1]) * 260
+    if period.endswith("mo"):
+        return int(period[:-2]) * 22
+    if period.endswith("d"):
+        return int(period[:-1])
+    return 600
+
+def tv_interval(interval):
+    if Interval is None:
+        return None
+    if interval == "1d":
+        return Interval.in_daily
+    return None
+
+def tradingview_symbol(ticker):
+    return ticker.replace(".IS", "")
+
+def get_tv_client():
+    global TV_CLIENT
+    if TvDatafeed is None:
+        return None
+    if TV_CLIENT is None:
+        TV_CLIENT = TvDatafeed()
+    return TV_CLIENT
+
+def veri_cek_yfinance(ticker, period, interval):
+    df = yf.download(ticker, period=period, interval=interval,
+                     progress=False, auto_adjust=True)
+    return normalize_ohlcv(df)
+
+def veri_cek_tradingview(ticker, period, interval):
+    client = get_tv_client()
+    tv_int = tv_interval(interval)
+    if client is None or tv_int is None:
+        return None
+    df = client.get_hist(
+        symbol=tradingview_symbol(ticker),
+        exchange=TV_EXCHANGE,
+        interval=tv_int,
+        n_bars=period_to_bars(period)
+    )
+    return normalize_ohlcv(df)
+
+def veri_cek_kaynakli(ticker, period, interval):
+    sources = [DATA_SOURCE]
+    fallback = "yfinance" if DATA_SOURCE == "tradingview" else "tradingview"
+    if ALLOW_DATA_FALLBACK and fallback not in sources:
+        sources.append(fallback)
+
+    for source in sources:
+        try:
+            if source == "tradingview":
+                df = veri_cek_tradingview(ticker, period, interval)
+            elif source == "yfinance":
+                df = veri_cek_yfinance(ticker, period, interval)
+            else:
+                df = None
+            if df is not None and len(df) > 0:
+                return df, source
+        except Exception:
+            continue
+    return None, ""
+
+def veri_cek(ticker, period, interval):
+    df, _ = veri_cek_kaynakli(ticker, period, interval)
     return df
 
 def htf_ok(ticker):
@@ -200,11 +306,13 @@ def sinyal_hesapla(df):
 
     ma_trend = sma(close, MA_TREND_LEN)
     ma_slope_ok = ma_trend >= ma_trend.shift(MA_SLOPE_BARS) * (1.0 + MIN_MA_SLOPE_PCT / 100.0)
-    price_above_ma_ok = (close > ma_trend) if USE_PRICE_ABOVE_MA else pd.Series(True, index=close.index)
-    trend_ok = ((ma_slope_ok if USE_TREND else pd.Series(True, index=close.index)) & price_above_ma_ok)
-    vol_ok = (vol > sma(vol, VOL_LEN)) if USE_VOLUME else pd.Series(True, index=close.index)
+    trend_ok = ma_slope_ok if USE_TREND else pd.Series(True, index=close.index)
+    vol_avg = sma(vol, VOL_LEN)
+    vol_ok = (vol >= vol_avg * (1.0 + MIN_VOLUME_ABOVE_AVG_PCT / 100.0)) if USE_VOLUME_ABOVE_AVG else pd.Series(True, index=close.index)
+    adx = adx_calc(high, low, close, ADX_LEN)
+    adx_ok = ((adx.shift(ADX_SLOPE_BARS) > 0) & (adx >= adx.shift(ADX_SLOPE_BARS) * (1.0 + MIN_ADX_RISE_PCT / 100.0))) if USE_ADX else pd.Series(True, index=close.index)
     setup_repeated = c1.shift(1).fillna(False) & c2.shift(1).fillna(False) & c3.shift(1).fillna(False)
-    long_raw = c1 & c2 & c3 & trend_ok & vol_ok & ~setup_repeated
+    long_raw = c1 & c2 & c3 & trend_ok & vol_ok & adx_ok & ~setup_repeated
     sat_raw = (K < ema_k) & (K.shift(1) >= ema_k.shift(1))
 
     cross_level = valuewhen(cross3_raw, K)
@@ -256,6 +364,69 @@ def sinyal_hesapla(df):
 
     return al_sinyal, sat_sinyal, close, grade_sinyal, stop_fiyat, sat_neden
 
+
+def gunluk_al_tara(symbols=None, log_func=None):
+    """tarama.py ile daily_scan_telegram.py ayni AL sonucunu uretsin."""
+    symbols = BIST_HISSELER if symbols is None else symbols
+    al_listesi = []
+    hata_listesi = []
+    toplam = len(symbols)
+
+    def log(message):
+        if log_func is not None:
+            log_func(message)
+
+    for idx, hisse in enumerate(symbols, 1):
+        ticker = hisse + ".IS"
+        log(f"[{idx:3d}/{toplam}] {hisse}: taraniyor")
+        try:
+            if USE_HTF and not htf_ok(ticker):
+                log(f"{hisse}: HTF engelledi")
+                continue
+
+            df, veri_kaynagi = veri_cek_kaynakli(ticker, PERIOD_1D, INTERVAL)
+            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5, ADX_LEN + ADX_SLOPE_BARS + 5):
+                log(f"{hisse}: veri yok")
+                hata_listesi.append(hisse)
+                continue
+
+            al, sat, close, grade, stop_fiyat, sat_neden = sinyal_hesapla(df)
+
+            if len(al) < 3:
+                log(f"{hisse}: yetersiz veri")
+                continue
+
+            son_al = bool(al.iloc[-1])
+            son_sat = bool(sat.iloc[-1])
+
+            if son_al:
+                sinyal_tarihi = df.index[-1].strftime("%d.%m.%Y")
+                sinyal_fiyat = round(float(close.iloc[-1]), 2)
+                stop_seviye = round(float(stop_fiyat.iloc[-1]), 2)
+                al_gucu = buy_grade_text(int(grade.iloc[-1]))
+
+                al_listesi.append({
+                    "Hisse": hisse,
+                    "Kapanış Fiyatı": sinyal_fiyat,
+                    "Stop Fiyatı": stop_seviye,
+                    "AL Gücü": al_gucu,
+                    "Sinyal Tarihi": sinyal_tarihi,
+                    "Veri Kaynagi": veri_kaynagi,
+                    "Not": "Ertesi gün açılışta giriş"
+                })
+                log(f"{hisse}: {al_gucu} sinyali bulundu @ {sinyal_fiyat} stop {stop_seviye} | veri: {veri_kaynagi}")
+            elif son_sat:
+                neden = sat_neden.iloc[-1] if sat_neden.iloc[-1] else "SAT"
+                log(f"{hisse}: {neden}")
+            else:
+                log(f"{hisse}: sinyal yok")
+
+        except Exception as e:
+            log(f"{hisse}: hata - {e}")
+            hata_listesi.append(hisse)
+
+    return al_listesi, hata_listesi
+
 # ─────────────────────────────────────────────
 # ANA TARAMA
 # ─────────────────────────────────────────────
@@ -263,9 +434,11 @@ def tara():
     print("\n" + "="*60)
     print("  BİST ESv1 TARAMA — GÜNLÜK PERİYOT")
     print(f"  Tarih  : {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+    print(f"  Veri   : {DATA_SOURCE} | fallback: {'ACIK' if ALLOW_DATA_FALLBACK else 'KAPALI'}")
     print(f"  HTF    : {'AÇIK' if USE_HTF else 'KAPALI'}")
-    print(f"  Hacim  : {'AÇIK' if USE_VOLUME else 'KAPALI'}")
-    print(f"  MA50   : {'AÇIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT} | Fiyat>MA50: {'AÇIK' if USE_PRICE_ABOVE_MA else 'KAPALI'}")
+    print(f"  Hacim  : {'AÇIK' if USE_VOLUME_ABOVE_AVG else 'KAPALI'} | {VOL_LEN} ortalama üstü >= %{MIN_VOLUME_ABOVE_AVG_PCT}")
+    print(f"  MA50   : {'AÇIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT}")
+    print(f"  ADX    : {'AÇIK' if USE_ADX else 'KAPALI'} | {ADX_SLOPE_BARS} bar >= %{MIN_ADX_RISE_PCT}")
     print(f"  Hisse  : {len(BIST_HISSELER)} adet")
     print("  ⭐ Son kapanan günlük mumda sinyal aranıyor")
     print("     → Ertesi gün açılışta giriş yapılabilir")
@@ -283,8 +456,8 @@ def tara():
                 print("— HTF engelledi")
                 continue
 
-            df = veri_cek(ticker, PERIOD_1D, INTERVAL)
-            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5):
+            df, veri_kaynagi = veri_cek_kaynakli(ticker, PERIOD_1D, INTERVAL)
+            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5, ADX_LEN + ADX_SLOPE_BARS + 5):
                 print("⚠ Veri yok")
                 hata_listesi.append(hisse)
                 continue
@@ -312,9 +485,10 @@ def tara():
                     "Stop Fiyatı"    : stop_seviye,
                     "AL Gücü"        : al_gucu,
                     "Sinyal Tarihi"  : sinyal_tarihi,
+                    "Veri Kaynagi"   : veri_kaynagi,
                     "Not"            : "Ertesi gün açılışta giriş"
                 })
-                print(f"✅ {al_gucu} — {sinyal_fiyat} ₺ | Stop {stop_seviye} ₺  ({sinyal_tarihi})")
+                print(f"✅ {al_gucu} — {sinyal_fiyat} ₺ | Stop {stop_seviye} ₺  ({sinyal_tarihi}) | Veri: {veri_kaynagi}")
             elif son_sat:
                 neden = sat_neden.iloc[-1] if sat_neden.iloc[-1] else "SAT"
                 print(f"-- {neden}")
@@ -334,7 +508,7 @@ def tara():
     print("="*60)
     if al_listesi:
         for h in al_listesi:
-            print(f"  {h['Hisse']:<10} {h['Kapanış Fiyatı']:>10.2f} ₺   Stop: {h['Stop Fiyatı']:>10.2f} ₺   {h['AL Gücü']:<10} {h['Sinyal Tarihi']}")
+            print(f"  {h['Hisse']:<10} {h['Kapanış Fiyatı']:>10.2f} ₺   Stop: {h['Stop Fiyatı']:>10.2f} ₺   {h['AL Gücü']:<10} {h['Sinyal Tarihi']}   Veri: {h['Veri Kaynagi']}")
     else:
         print("  Sinyal veren hisse bulunamadı.")
 
