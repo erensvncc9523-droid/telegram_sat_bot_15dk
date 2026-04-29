@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 # Reuse the BIST list and daily signal logic from the existing scanner.
-from tarama import BIST_HISSELER, sinyal_hesapla, veri_cek_kaynakli
+from tarama import BIST_HISSELER, sinyal_hesapla, son_veri_kaynagi_hatasi, veri_cek_kaynakli
 
 
 def get_data_dir() -> Path:
@@ -355,6 +355,10 @@ def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
     daily_df, data_source = download_ohlcv(ticker, f"{config['history_days_daily']}d", config["buy_timeframe"])
     if daily_df is None:
         return StrategyResult(events=[], last_price=None, change_pct=None, data_source=data_source)
+    if data_source == "yfinance":
+        fallback_reason = son_veri_kaynagi_hatasi()
+        if fallback_reason:
+            log_info(f"{symbol}: TradingView kullanilamadi, yfinance kullanildi ({fallback_reason})")
     last_price, change_pct = latest_price_change(daily_df)
     merged = compute_daily_strategy_events(daily_df)
 
