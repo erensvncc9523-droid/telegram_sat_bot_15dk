@@ -352,7 +352,7 @@ def compute_daily_strategy_events(df: pd.DataFrame) -> list[Event]:
 
 def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
     ticker = f"{symbol}.IS"
-    daily_df, data_source = download_ohlcv(ticker, str(config['history_days_daily']), config["buy_timeframe"])
+    daily_df, data_source = download_ohlcv(ticker, f"{config['history_days_daily']}d", config["buy_timeframe"])
     if daily_df is None:
         return StrategyResult(events=[], last_price=None, change_pct=None, data_source=data_source)
     if data_source == "yfinance":
