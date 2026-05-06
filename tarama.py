@@ -52,17 +52,17 @@ WEAK_MIN    = 70.0
 STOP_LOSS_PCT = 5.0
 PROFIT_TRIGGER_PCT = 15.0
 PULLBACK_PCT = 5.0
-MA_TREND_LEN = 50
+MA_TREND_LEN = 20
 MA_SLOPE_BARS = 5
-MIN_MA_SLOPE_PCT = 0.2
+MIN_MA_SLOPE_PCT = 0.5
 MIN_VOLUME_ABOVE_AVG_PCT = 12.0
 ADX_LEN = 14
 ADX_SLOPE_BARS = 5
 MIN_ADX_RISE_PCT = 1.2
 
 USE_HTF     = False    # Varsayılan OFF
-USE_VOLUME_ABOVE_AVG = True
-USE_TREND   = True     # MA50 slope-only filtresi
+USE_VOLUME_ABOVE_AVG = False
+USE_TREND   = True     # MA20 slope-only filtresi
 USE_ADX     = True
 # ─────────────────────────────────────────────
 # BIST HİSSE LİSTESİ
