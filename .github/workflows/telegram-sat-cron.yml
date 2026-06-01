@@ -1,8 +1,9 @@
 name: Telegram SAT Scan Cron
 
 on:
-  repository_dispatch:
-    types: [sat_scan_cron]
+  schedule:
+    - cron: "33 7 * * *"
+    - cron: "3,33 8-15 * * *"
   workflow_dispatch:
 
 permissions:
