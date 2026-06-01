@@ -1,4 +1,0 @@
-[deploy]
-startCommand = "python telegram_sat_bot.py --once"
-cronSchedule = "*/15 7-15 * * 1-5"
-restartPolicyType = "NEVER"
