@@ -2,10 +2,9 @@ name: Telegram SAT Scan
 
 on:
   schedule:
-    - cron: "33 10 * * *"
-      timezone: "Europe/Istanbul"
-    - cron: "3,33 11-18 * * *"
-      timezone: "Europe/Istanbul"
+    # Temporary schedule trigger test. Restore the production window after
+    # the first automatic run appears in GitHub Actions.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
