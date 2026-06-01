@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: telegram_bot_state.json
-          key: telegram-sat-state
+          key: telegram-sat-state-${{ github.run_id }}
           restore-keys: |
             telegram-sat-state-
 
