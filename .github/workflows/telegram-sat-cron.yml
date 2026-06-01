@@ -1,10 +1,8 @@
 name: Telegram SAT Scan Cron
 
 on:
-  schedule:
-    # Temporary registration test. Restore the production window after the
-    # first automatic run appears in GitHub Actions.
-    - cron: "*/5 * * * *"
+  repository_dispatch:
+    types: [sat_scan_cron]
   workflow_dispatch:
 
 permissions:
