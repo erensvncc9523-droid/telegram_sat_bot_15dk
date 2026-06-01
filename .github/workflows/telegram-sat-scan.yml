@@ -1,0 +1,58 @@
+name: Telegram SAT Scan
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-sat-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Restore bot state
+        uses: actions/cache/restore@v4
+        with:
+          path: telegram_bot_state.json
+          key: telegram-sat-state-${{ github.run_id }}
+          restore-keys: |
+            telegram-sat-state-
+
+      - name: Scan once and send new SAT signals
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SYMBOLS: ${{ vars.SYMBOLS }}
+          SEND_BUY_MESSAGES: "false"
+          SEND_SELL_MESSAGES: "true"
+          SEND_SCAN_SUMMARY: "false"
+          SEND_SIGNAL_MESSAGE_SEPARATELY: "true"
+          PYTHONUNBUFFERED: "1"
+        run: python telegram_sat_bot.py --once
+
+      - name: Save bot state
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: telegram_bot_state.json
+          key: telegram-sat-state-${{ github.run_id }}
