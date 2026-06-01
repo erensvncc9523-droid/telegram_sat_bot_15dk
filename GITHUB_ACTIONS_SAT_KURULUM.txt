@@ -1,0 +1,40 @@
+GitHub Actions 15 Dakikalik SAT Botu
+
+Amac:
+- telegram_sat_bot.py dosyasini her 15 dakikada bir calistirir.
+- Yalnizca yeni SAT sinyallerini Telegram'a gonderir.
+- Onceki sinyallerin tekrar gonderilmemesi icin state dosyasini GitHub Actions
+  cache icinde saklar.
+
+GitHub'a yuklenecek dosyalar:
+- .github/workflows/telegram-sat-scan.yml
+- telegram_sat_bot.py
+- tarama.py
+- requirements.txt
+- .gitignore
+- GITHUB_ACTIONS_SAT_KURULUM.txt
+
+Kurulum:
+1. Farkli GitHub reposunda Settings > Secrets and variables > Actions ekranina gir.
+2. Secrets sekmesinde New repository secret ile sunlari ekle:
+   TELEGRAM_BOT_TOKEN=...
+   TELEGRAM_CHAT_ID=...
+3. Variables sekmesinde New repository variable ile izlenecek hisseleri ekle:
+   Name: SYMBOLS
+   Value: GENTS,ONCSM
+4. Actions sekmesinden Telegram SAT Scan workflow'unu sec.
+5. Run workflow ile bir kez elle calistir.
+
+Zamanlama:
+- cron: 7,22,37,52 * * * *
+- Her saat 07, 22, 37 ve 52. dakikalarda calisir.
+- Calisma araligi 15 dakikadir. GitHub Actions saat basinda yogun olabildigi icin
+  00. dakika yerine 07. dakika tercih edilmistir.
+
+Notlar:
+- SYMBOLS bos birakilirsa tarama.py icindeki tum BIST listesi taranir.
+- Yalnizca elindeki veya izlemek istedigin hisseleri SYMBOLS icine yazman onerilir.
+- telegram_bot_state.json dosyasini GitHub reposuna yukleme. Workflow bu dosyayi
+  cache icinde saklar.
+- GitHub Actions zamanlanmis gorevleri yogunluk durumunda bir miktar gec
+  baslatabilir.

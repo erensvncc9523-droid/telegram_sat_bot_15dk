@@ -58,7 +58,7 @@ WEAK_MIN    = 70.0
 GRADE_STRONG_MAX = min(STRONG_MAX, WEAK_MIN)
 GRADE_WEAK_MIN = max(STRONG_MAX, WEAK_MIN)
 STOP_LOSS_PCT = 5.0
-PROFIT_TRIGGER_PCT = 20.0 # Kar Stop
+PROFIT_TRIGGER_PCT = 15.0
 PULLBACK_PCT = 5.0
 MA_TREND_LEN = 20
 MA_SLOPE_BARS = 5
@@ -68,6 +68,7 @@ ADX_LEN = 14
 ADX_SLOPE_BARS = 3
 MIN_ADX_RISE_PCT = 0.8
 
+USE_SIGNAL_VOLUME_FILTER = True
 USE_HTF     = False    # Varsayılan OFF
 USE_TREND   = True     # MA20 slope-only filtresi
 USE_ADX     = True
@@ -358,7 +359,10 @@ def sinyal_hesapla(df):
     ma_slope_ok = ma_trend >= ma_trend.shift(MA_SLOPE_BARS) * (1.0 + MIN_MA_SLOPE_PCT / 100.0)
     trend_ok = ma_slope_ok if USE_TREND else pd.Series(True, index=close.index)
     vol_avg = sma(vol, VOL_LEN)
-    signal_vol_ok = (vol.shift(1) > vol_avg.shift(1)) & (vol >= vol_avg * SIGNAL_VOLUME_MULTIPLIER)
+    if USE_SIGNAL_VOLUME_FILTER:
+        signal_vol_ok = (vol.shift(1) > vol_avg.shift(1)) & (vol >= vol_avg * SIGNAL_VOLUME_MULTIPLIER)
+    else:
+        signal_vol_ok = pd.Series(True, index=close.index)
     adx = adx_calc(high, low, close, ADX_LEN)
     adx_ok = ((adx.shift(ADX_SLOPE_BARS) > 0) & (adx >= adx.shift(ADX_SLOPE_BARS) * (1.0 + MIN_ADX_RISE_PCT / 100.0))) if USE_ADX else pd.Series(True, index=close.index)
     setup_repeated = c1.shift(1).fillna(False) & c2.shift(1).fillna(False) & c3.shift(1).fillna(False)
@@ -484,16 +488,16 @@ def gunluk_al_tara(symbols=None, log_func=None):
 # ─────────────────────────────────────────────
 def tara():
     print("\n" + "="*60)
-    print("  BİST ESv1 TARAMA — GÜNLÜK PERİYOT")
+    print("  BIST ESv1 TARAMA - GUNLUK PERIYOT")
     print(f"  Tarih  : {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print(f"  Veri   : {DATA_SOURCE} | fallback: {'ACIK' if ALLOW_DATA_FALLBACK else 'KAPALI'}")
-    print(f"  HTF    : {'AÇIK' if USE_HTF else 'KAPALI'}")
-    print(f"  Hacim  : ZORUNLU | onceki mum > {VOL_LEN} ort, son mum >= {SIGNAL_VOLUME_MULTIPLIER}x ort")
-    print(f"  MA20   : {'AÇIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT}")
-    print(f"  ADX    : {'AÇIK' if USE_ADX else 'KAPALI'} | {ADX_SLOPE_BARS} bar >= %{MIN_ADX_RISE_PCT}")
+    print(f"  HTF    : {'ACIK' if USE_HTF else 'KAPALI'}")
+    print(f"  Hacim  : {'ACIK' if USE_SIGNAL_VOLUME_FILTER else 'KAPALI'} | onceki mum > {VOL_LEN} ort, son mum >= {SIGNAL_VOLUME_MULTIPLIER}x ort")
+    print(f"  MA20   : {'ACIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT}")
+    print(f"  ADX    : {'ACIK' if USE_ADX else 'KAPALI'} | {ADX_SLOPE_BARS} bar >= %{MIN_ADX_RISE_PCT}")
     print(f"  Hisse  : {len(BIST_HISSELER)} adet")
-    print("  ⭐ Son kapanan günlük mumda sinyal aranıyor")
-    print("     → Ertesi gün açılışta giriş yapılabilir")
+    print("  Son kapanan gunluk mumda sinyal araniyor")
+    print("     -> Ertesi gun acilista giris yapilabilir")
     print("="*60)
 
     al_listesi   = []
@@ -505,21 +509,21 @@ def tara():
         print(f"  [{idx:3d}/{toplam}] {hisse:<10}", end=" ", flush=True)
         try:
             if USE_HTF and not htf_ok(ticker):
-                print("— HTF engelledi")
+                print("- HTF engelledi")
                 continue
 
             df, veri_kaynagi = veri_cek_kaynakli(ticker, PERIOD_1D, INTERVAL)
             if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5, ADX_LEN + ADX_SLOPE_BARS + 5):
                 hata = son_veri_kaynagi_hatasi()
                 kaynak_text = veri_kaynagi if veri_kaynagi else "yok"
-                print(f"⚠ Veri yok | Veri: {kaynak_text}" + (f" | {hata}" if hata else ""))
+                print(f"! Veri yok | Veri: {kaynak_text}" + (f" | {hata}" if hata else ""))
                 hata_listesi.append(hisse)
                 continue
 
             al, sat, close, grade, stop_fiyat, sat_neden = sinyal_hesapla(df)
 
             if len(al) < 3:
-                print("— Yetersiz veri")
+                print("- Yetersiz veri")
                 continue
 
             # Son kapanan mum (iloc[-1]) — günlük periyotta mum kapanmış olur
@@ -542,40 +546,44 @@ def tara():
                     "Veri Kaynagi"   : veri_kaynagi,
                     "Not"            : "Ertesi gün açılışta giriş"
                 })
-                print(f"✅ {al_gucu} — {sinyal_fiyat} ₺ | Stop {stop_seviye} ₺  ({sinyal_tarihi}) | Veri: {veri_kaynagi}")
+                print(f"OK {al_gucu} - {sinyal_fiyat} TL | Stop {stop_seviye} TL  ({sinyal_tarihi}) | Veri: {veri_kaynagi}")
             elif son_sat:
                 neden = sat_neden.iloc[-1] if sat_neden.iloc[-1] else "SAT"
                 print(f"-- {neden} | Veri: {veri_kaynagi}")
             else:
-                print(f"— Sinyal yok | Veri: {veri_kaynagi}")
+                print(f"- Sinyal yok | Veri: {veri_kaynagi}")
 
         except Exception as e:
-            print(f"✗ Hata: {e}")
+            print(f"X Hata: {e}")
             hata_listesi.append(hisse)
 
     # ─────────────────────────────────────────────
     # SONUÇLAR
     # ─────────────────────────────────────────────
     print("\n" + "="*60)
-    print(f"  AL SİNYALİ VEREN HİSSELER ({len(al_listesi)} adet)")
-    print(f"  → Yarın açılışta giriş yapılabilir")
+    print(f"  AL SINYALI VEREN HISSELER ({len(al_listesi)} adet)")
+    print(f"  -> Yarin acilista giris yapilabilir")
     print("="*60)
     if al_listesi:
         for h in al_listesi:
-            print(f"  {h['Hisse']:<10} {h['Kapanış Fiyatı']:>10.2f} ₺   Stop: {h['Stop Fiyatı']:>10.2f} ₺   {h['AL Gücü']:<10} {h['Sinyal Tarihi']}   Veri: {h['Veri Kaynagi']}")
+            print(f"  {h['Hisse']:<10} {h['Kapanış Fiyatı']:>10.2f} TL   Stop: {h['Stop Fiyatı']:>10.2f} TL   {h['AL Gücü']:<10} {h['Sinyal Tarihi']}   Veri: {h['Veri Kaynagi']}")
     else:
-        print("  Sinyal veren hisse bulunamadı.")
+        print("  Sinyal veren hisse bulunamadi.")
 
     if al_listesi:
         dosya = f"bist_al_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         pd.DataFrame(al_listesi).to_excel(dosya, index=False)
-        print(f"\n  📊 Excel kaydedildi: {dosya}")
+        print(f"\n  Excel kaydedildi: {dosya}")
 
     if hata_listesi:
-        print(f"\n  ⚠ Veri alınamayan: {len(hata_listesi)} hisse")
+        print(f"\n  Veri alinamayan: {len(hata_listesi)} hisse")
 
     print("="*60 + "\n")
-    input("  Çıkmak için Enter'a basın...")
+    try:
+        input("  Cikmak icin Enter'a basin...")
+    except EOFError:
+        pass
 
 if __name__ == "__main__":
+    print("Gunluk tarama baslatiliyor...", flush=True)
     tara()
