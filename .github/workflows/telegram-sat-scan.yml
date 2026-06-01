@@ -2,7 +2,7 @@ name: Telegram SAT Scan
 
 on:
   schedule:
-    # Temporary schedule trigger test. Restore the production window after
+    # Temp orary schedule trigger test. Restore the production window after
     # the first automatic run appears in GitHub Actions.
     - cron: "*/5 * * * *"
   workflow_dispatch:
