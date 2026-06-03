@@ -45,7 +45,7 @@ jobs:
           SYMBOLS: ${{ vars.SYMBOLS }}
           SEND_BUY_MESSAGES: "false"
           SEND_SELL_MESSAGES: "true"
-          SEND_SCAN_SUMMARY: "false"
+          SEND_SCAN_SUMMARY: "true"
           SEND_SIGNAL_MESSAGE_SEPARATELY: "true"
           PYTHONUNBUFFERED: "1"
         run: python telegram_sat_bot.py --once
