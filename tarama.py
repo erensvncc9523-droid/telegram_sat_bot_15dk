@@ -360,14 +360,15 @@ def sinyal_hesapla(df):
     trend_ok = ma_slope_ok if USE_TREND else pd.Series(True, index=close.index)
     vol_avg = sma(vol, VOL_LEN)
     if USE_SIGNAL_VOLUME_FILTER:
-        signal_vol_ok = (vol.shift(1) > vol_avg.shift(1)) & (vol >= vol_avg * SIGNAL_VOLUME_MULTIPLIER)
+        signal_vol_ok = vol >= vol_avg * SIGNAL_VOLUME_MULTIPLIER
     else:
         signal_vol_ok = pd.Series(True, index=close.index)
     adx = adx_calc(high, low, close, ADX_LEN)
     adx_ok = ((adx.shift(ADX_SLOPE_BARS) > 0) & (adx >= adx.shift(ADX_SLOPE_BARS) * (1.0 + MIN_ADX_RISE_PCT / 100.0))) if USE_ADX else pd.Series(True, index=close.index)
     setup_repeated = c1.shift(1).fillna(False) & c2.shift(1).fillna(False) & c3.shift(1).fillna(False)
     long_raw = c1 & c2 & c3 & trend_ok & signal_vol_ok & adx_ok & ~setup_repeated
-    sat_raw = (K < ema_k) & (K.shift(1) >= ema_k.shift(1))
+    # sat_raw sadece bilgi amacli hesaplaniyor, pozisyon kapatmiyor
+    sat_raw = pd.Series(False, index=close.index)
 
     cross_level = valuewhen(cross3_raw, K)
     grade = pd.Series(0, index=close.index)
@@ -492,7 +493,7 @@ def tara():
     print(f"  Tarih  : {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print(f"  Veri   : {DATA_SOURCE} | fallback: {'ACIK' if ALLOW_DATA_FALLBACK else 'KAPALI'}")
     print(f"  HTF    : {'ACIK' if USE_HTF else 'KAPALI'}")
-    print(f"  Hacim  : {'ACIK' if USE_SIGNAL_VOLUME_FILTER else 'KAPALI'} | onceki mum > {VOL_LEN} ort, son mum >= {SIGNAL_VOLUME_MULTIPLIER}x ort")
+    print(f"  Hacim  : {'ACIK' if USE_SIGNAL_VOLUME_FILTER else 'KAPALI'} | son mum >= {SIGNAL_VOLUME_MULTIPLIER}x ort")
     print(f"  MA20   : {'ACIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT}")
     print(f"  ADX    : {'ACIK' if USE_ADX else 'KAPALI'} | {ADX_SLOPE_BARS} bar >= %{MIN_ADX_RISE_PCT}")
     print(f"  Hisse  : {len(BIST_HISSELER)} adet")

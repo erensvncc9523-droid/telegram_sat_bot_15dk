@@ -337,6 +337,33 @@ def latest_price_change(df: pd.DataFrame) -> tuple[float | None, float | None]:
     return last_price, change_pct
 
 
+
+
+def compute_negative_cross_events(df: pd.DataFrame, config: dict) -> list[Event]:
+    close = ensure_series(df["Close"])
+    k_line, _ = stoch_rsi(
+        close,
+        int(config.get("rsi_len", 14)),
+        int(config.get("stoch_len", 14)),
+        int(config.get("smooth_k", 3)),
+        int(config.get("smooth_d", 3)),
+    )
+    ema_k = ema(k_line, int(config.get("ema_len", 14)))
+    cross_down = crossunder(k_line, ema_k)
+
+    events = []
+    for ts in df.index[cross_down.fillna(False)]:
+        events.append(
+            Event(
+                timestamp=pd.Timestamp(ts),
+                kind="NEGATIVE_CROSS",
+                price=float(close.loc[ts]),
+                reason="NEGATIVE_CROSS",
+            )
+        )
+    return events
+
+
 def compute_daily_strategy_events(df: pd.DataFrame) -> list[Event]:
     al_sinyal, sat_sinyal, close, grade, stop_fiyat, sat_neden = sinyal_hesapla(df)
     events = []
@@ -361,6 +388,9 @@ def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
             log_info(f"{symbol}: TradingView kullanilamadi, yfinance kullanildi ({fallback_reason})")
     last_price, change_pct = latest_price_change(daily_df)
     merged = compute_daily_strategy_events(daily_df)
+    negative_cross_events = compute_negative_cross_events(daily_df, config)
+    merged.extend(negative_cross_events)
+    merged = sorted(merged, key=lambda item: item.timestamp)
 
     filtered = []
     in_position = False
@@ -368,6 +398,8 @@ def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
         if event.kind == "BUY" and not in_position:
             filtered.append(event)
             in_position = True
+        elif event.kind == "NEGATIVE_CROSS" and in_position:
+            filtered.append(event)
         elif event.kind == "SELL" and in_position:
             filtered.append(event)
             in_position = False
@@ -430,6 +462,18 @@ def format_signal_summary_line(symbol: str, event_name: str, event: Event, resul
             f"📊 {price_change_text(result)}",
             f"🕒 Zaman: {event.timestamp.strftime('%Y-%m-%d %H:%M')}",
             f"Veri: {result.data_source or 'yok'}",
+        ]
+    )
+
+
+
+
+def format_negative_cross_message(symbol: str) -> str:
+    return "\n".join(
+        [
+            "⚠️ Negatif kesişim gerçekleşti",
+            "",
+            f"📌 {symbol}",
         ]
     )
 
@@ -513,13 +557,22 @@ def scan_once(config: dict, state: dict) -> int:
 
             sent_events[event_key] = scan_time
             if can_send_separate_signal:
-                message = format_signal_message(symbol, event_name, latest_event, result)
+                if latest_event.kind == "NEGATIVE_CROSS":
+                    message = format_negative_cross_message(symbol)
+                else:
+                    message = format_signal_message(symbol, event_name, latest_event, result)
+
                 send_telegram_message(bot_token, chat_id, message)
                 messages_sent += 1
                 log_info(f"Mesaj gonderildi: {symbol} {event_name} {latest_event.timestamp}")
+
             if latest_event.kind == "SELL":
                 summary_lines.append(format_signal_summary_line(symbol, event_name, latest_event, result))
-                closed_symbols.add(symbol)
+
+                if latest_event.reason in ["STOP SAT", "KAR STOP"]:
+                    closed_symbols.add(symbol)
+            elif latest_event.kind == "NEGATIVE_CROSS":
+                summary_lines.append(format_negative_cross_message(symbol))
             else:
                 summary_lines.append(no_signal_text(symbol, result))
         except Exception as exc:
