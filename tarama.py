@@ -31,7 +31,7 @@ except ImportError:
     TvDatafeed = None
     Interval = None
 
-SCRIPT_VERSION = "tarama.py 2026-05-10 ESv2"
+SCRIPT_VERSION = "tarama.py 2026-06-08 ESv2-revised"
 
 # ─────────────────────────────────────────────
 # PARAMETRELER
@@ -64,14 +64,9 @@ MA_TREND_LEN = 20
 MA_SLOPE_BARS = 5
 MIN_MA_SLOPE_PCT = 0.5
 SIGNAL_VOLUME_MULTIPLIER = 1
-ADX_LEN = 14
-ADX_SLOPE_BARS = 3
-MIN_ADX_RISE_PCT = 0.8
-
 USE_SIGNAL_VOLUME_FILTER = True
 USE_HTF     = False    # Varsayılan OFF
 USE_TREND   = True     # MA20 slope-only filtresi
-USE_ADX     = False
 # ─────────────────────────────────────────────
 # BIST HİSSE LİSTESİ
 # ─────────────────────────────────────────────
@@ -165,22 +160,6 @@ def rma(series, length):
 
     return result
 
-def adx_calc(high, low, close, length):
-    up_move = high.diff()
-    down_move = -low.diff()
-    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
-    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
-
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
-    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-    atr = rma(true_range, length)
-    plus_di = 100.0 * rma(plus_dm, length) / atr
-    minus_di = 100.0 * rma(minus_dm, length) / atr
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    return rma(dx.replace([np.inf, -np.inf], np.nan), length)
 
 def rsi_calc(close, length):
     delta    = close.diff()
@@ -363,10 +342,8 @@ def sinyal_hesapla(df):
         signal_vol_ok = vol >= vol_avg * SIGNAL_VOLUME_MULTIPLIER
     else:
         signal_vol_ok = pd.Series(True, index=close.index)
-    adx = adx_calc(high, low, close, ADX_LEN)
-    adx_ok = ((adx.shift(ADX_SLOPE_BARS) > 0) & (adx >= adx.shift(ADX_SLOPE_BARS) * (1.0 + MIN_ADX_RISE_PCT / 100.0))) if USE_ADX else pd.Series(True, index=close.index)
     setup_repeated = c1.shift(1).fillna(False) & c2.shift(1).fillna(False) & c3.shift(1).fillna(False)
-    long_raw = c1 & c2 & c3 & trend_ok & signal_vol_ok & adx_ok & ~setup_repeated
+    long_raw = c1 & c2 & c3 & trend_ok & signal_vol_ok & ~setup_repeated
     # sat_raw sadece bilgi amacli hesaplaniyor, pozisyon kapatmiyor
     sat_raw = pd.Series(False, index=close.index)
 
@@ -440,7 +417,7 @@ def gunluk_al_tara(symbols=None, log_func=None):
                 continue
 
             df, veri_kaynagi = veri_cek_kaynakli(ticker, PERIOD_1D, INTERVAL)
-            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5, ADX_LEN + ADX_SLOPE_BARS + 5):
+            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5):
                 hata = son_veri_kaynagi_hatasi()
                 kaynak_text = veri_kaynagi if veri_kaynagi else "yok"
                 log(f"{hisse}: veri yok | veri: {kaynak_text}" + (f" | {hata}" if hata else ""))
@@ -495,7 +472,6 @@ def tara():
     print(f"  HTF    : {'ACIK' if USE_HTF else 'KAPALI'}")
     print(f"  Hacim  : {'ACIK' if USE_SIGNAL_VOLUME_FILTER else 'KAPALI'} | son mum >= {SIGNAL_VOLUME_MULTIPLIER}x ort")
     print(f"  MA20   : {'ACIK' if USE_TREND else 'KAPALI'} | {MA_SLOPE_BARS} bar >= %{MIN_MA_SLOPE_PCT}")
-    print(f"  ADX    : {'ACIK' if USE_ADX else 'KAPALI'} | {ADX_SLOPE_BARS} bar >= %{MIN_ADX_RISE_PCT}")
     print(f"  Hisse  : {len(BIST_HISSELER)} adet")
     print("  Son kapanan gunluk mumda sinyal araniyor")
     print("     -> Ertesi gun acilista giris yapilabilir")
@@ -514,7 +490,7 @@ def tara():
                 continue
 
             df, veri_kaynagi = veri_cek_kaynakli(ticker, PERIOD_1D, INTERVAL)
-            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5, ADX_LEN + ADX_SLOPE_BARS + 5):
+            if df is None or len(df) < max(30, MA_TREND_LEN + MA_SLOPE_BARS + 5, VOL_LEN + 5):
                 hata = son_veri_kaynagi_hatasi()
                 kaynak_text = veri_kaynagi if veri_kaynagi else "yok"
                 print(f"! Veri yok | Veri: {kaynak_text}" + (f" | {hata}" if hata else ""))
