@@ -63,7 +63,7 @@ PULLBACK_PCT = 5.0
 MA_TREND_LEN = 20
 MA_SLOPE_BARS = 5
 MIN_MA_SLOPE_PCT = 0.5
-SIGNAL_VOLUME_MULTIPLIER = 1.5
+SIGNAL_VOLUME_MULTIPLIER = 1
 ADX_LEN = 14
 ADX_SLOPE_BARS = 3
 MIN_ADX_RISE_PCT = 0.8
@@ -71,7 +71,7 @@ MIN_ADX_RISE_PCT = 0.8
 USE_SIGNAL_VOLUME_FILTER = True
 USE_HTF     = False    # Varsayılan OFF
 USE_TREND   = True     # MA20 slope-only filtresi
-USE_ADX     = True
+USE_ADX     = False
 # ─────────────────────────────────────────────
 # BIST HİSSE LİSTESİ
 # ─────────────────────────────────────────────
