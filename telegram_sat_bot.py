@@ -159,6 +159,7 @@ class StrategyResult:
     last_price: float | None
     change_pct: float | None
     data_source: str = ""
+    negative_cross: bool = False
 
 
 def configure_logging() -> None:
@@ -339,7 +340,8 @@ def latest_price_change(df: pd.DataFrame) -> tuple[float | None, float | None]:
 
 
 
-def compute_negative_cross_events(df: pd.DataFrame, config: dict) -> list[Event]:
+def is_last_bar_negative_cross(df: pd.DataFrame, config: dict) -> bool:
+    """Son barda K < EMA_K ise True döner (gün içi dinamik)."""
     close = ensure_series(df["Close"])
     k_line, _ = stoch_rsi(
         close,
@@ -349,19 +351,7 @@ def compute_negative_cross_events(df: pd.DataFrame, config: dict) -> list[Event]
         int(config.get("smooth_d", 3)),
     )
     ema_k = ema(k_line, int(config.get("ema_len", 14)))
-    cross_down = crossunder(k_line, ema_k)
-
-    events = []
-    for ts in df.index[cross_down.fillna(False)]:
-        events.append(
-            Event(
-                timestamp=pd.Timestamp(ts),
-                kind="NEGATIVE_CROSS",
-                price=float(close.loc[ts]),
-                reason="NEGATIVE_CROSS",
-            )
-        )
-    return events
+    return bool(k_line.iloc[-1] < ema_k.iloc[-1])
 
 
 def compute_daily_strategy_events(df: pd.DataFrame) -> list[Event]:
@@ -381,29 +371,31 @@ def build_strategy_result(symbol: str, config: dict) -> StrategyResult:
     ticker = f"{symbol}.IS"
     daily_df, data_source = download_ohlcv(ticker, f"{config['history_days_daily']}d", config["buy_timeframe"])
     if daily_df is None:
-        return StrategyResult(events=[], last_price=None, change_pct=None, data_source=data_source)
+        return StrategyResult(events=[], last_price=None, change_pct=None, data_source=data_source, negative_cross=False)
     if data_source == "yfinance":
         fallback_reason = son_veri_kaynagi_hatasi()
         if fallback_reason:
             log_info(f"{symbol}: TradingView kullanilamadi, yfinance kullanildi ({fallback_reason})")
     last_price, change_pct = latest_price_change(daily_df)
-    merged = compute_daily_strategy_events(daily_df)
-    negative_cross_events = compute_negative_cross_events(daily_df, config)
-    merged.extend(negative_cross_events)
-    merged = sorted(merged, key=lambda item: item.timestamp)
+    all_events = compute_daily_strategy_events(daily_df)
+    all_events = sorted(all_events, key=lambda item: item.timestamp)
 
+    # Pozisyon sadece STOP SAT veya KAR STOP ile kapanır
     filtered = []
     in_position = False
-    for event in merged:
+    for event in all_events:
         if event.kind == "BUY" and not in_position:
             filtered.append(event)
             in_position = True
-        elif event.kind == "NEGATIVE_CROSS" and in_position:
-            filtered.append(event)
         elif event.kind == "SELL" and in_position:
             filtered.append(event)
-            in_position = False
-    return StrategyResult(events=filtered, last_price=last_price, change_pct=change_pct, data_source=data_source)
+            if event.reason in ("STOP SAT", "KAR STOP"):
+                in_position = False
+
+    # Son bar anlık K < EMA_K durumu (gün içi dinamik)
+    negative_cross = is_last_bar_negative_cross(daily_df, config) if in_position else False
+
+    return StrategyResult(events=filtered, last_price=last_price, change_pct=change_pct, data_source=data_source, negative_cross=negative_cross)
 
 
 def price_change_text(result: StrategyResult) -> str:
@@ -537,66 +529,60 @@ def scan_once(config: dict, state: dict) -> int:
             result = build_strategy_result(symbol, config)
             events = result.events
             if not events:
-                log_info(f"{symbol}: olay bulunamadi")
-                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
+                log_info(f"{symbol}: pozisyon yok, atlandi")
                 continue
+
             latest_event = events[-1]
             event_name = latest_event.reason if latest_event.kind == "SELL" and latest_event.reason else latest_event.kind
             log_info(f"{symbol}: son olay = {event_name} @ {latest_event.timestamp:%Y-%m-%d %H:%M} fiyat {latest_event.price:.2f}")
-            event_key = f"{symbol}|{event_name}|{latest_event.timestamp.isoformat()}"
-            if event_key in sent_events:
-                log_info(f"{symbol}: bu olay daha once gonderilmis")
-                if latest_event.kind == "NEGATIVE_CROSS":
-                    summary_lines.append(format_summary_line(symbol, result, "Negatif Kesişim"))
-                elif latest_event.kind == "SELL":
-                    summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
-                else:
-                    summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
-                continue
-            if latest_event.kind == "BUY" and not config["send_buy_messages"]:
-                log_info(f"{symbol}: son olay BUY, BUY mesajlari kapali")
-                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
-                continue
-            if latest_event.kind == "SELL" and not config["send_sell_messages"]:
-                log_info(f"{symbol}: son olay SELL, SELL mesajlari kapali")
+
+            # Pozisyon açık mı? Son event SELL(STOP/KARSTOP) ise kapanmış demektir
+            position_open = not (latest_event.kind == "SELL" and latest_event.reason in ("STOP SAT", "KAR STOP"))
+
+            if not position_open:
+                # Pozisyon kapandı — sadece yeni olaysa özete ekle
+                event_key = f"{symbol}|{event_name}|{latest_event.timestamp.isoformat()}"
+                if event_key in sent_events:
+                    log_info(f"{symbol}: bu kapaniş daha once gonderilmis")
+                    continue
+                if not config["send_sell_messages"]:
+                    log_info(f"{symbol}: SELL mesajlari kapali")
+                    continue
+                can_send_separate_signal = config.get("send_signal_message_separately", False)
+                can_send_summary = config.get("send_scan_summary", True)
+                if not can_send_separate_signal and not can_send_summary:
+                    continue
+                sent_events[event_key] = scan_time
+                if can_send_separate_signal:
+                    send_telegram_message(bot_token, chat_id, format_signal_message(symbol, event_name, latest_event, result))
+                    messages_sent += 1
                 summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
+                closed_symbols.add(symbol)
                 continue
+
+            # Pozisyon açık — durum son bar'daki anlık K/EMA_K'ya göre belirlenir (gün içi dinamik)
+            durum = "Negatif Kesişim" if result.negative_cross else "Pozitif Kesişim"
+            log_info(f"{symbol}: pozisyon acik, anlık durum = {durum}")
 
             can_send_separate_signal = config.get("send_signal_message_separately", False)
             can_send_summary = config.get("send_scan_summary", True)
-            if not can_send_separate_signal and not can_send_summary:
-                log_info(
-                    f"{symbol}: gonderilecek {event_name} var ama "
-                    "SEND_SIGNAL_MESSAGE_SEPARATELY=false ve SEND_SCAN_SUMMARY=false"
-                )
-                continue
 
-            sent_events[event_key] = scan_time
-            if can_send_separate_signal:
-                if latest_event.kind == "NEGATIVE_CROSS":
-                    message = format_negative_cross_message(symbol, latest_event, result)
-                else:
-                    message = format_signal_message(symbol, event_name, latest_event, result)
+            if result.negative_cross:
+                # Negatif kesişim ayrı mesaj olarak gönder (her taramada gönder, dinamik)
+                if can_send_separate_signal:
+                    send_telegram_message(bot_token, chat_id, format_negative_cross_message(symbol))
+                    messages_sent += 1
+                    log_info(f"Negatif kesisim mesaji gonderildi: {symbol}")
 
-                send_telegram_message(bot_token, chat_id, message)
-                messages_sent += 1
-                log_info(f"Mesaj gonderildi: {symbol} {event_name} {latest_event.timestamp}")
-
-            if latest_event.kind == "SELL":
-                summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
-
-                if latest_event.reason in ["STOP SAT", "KAR STOP"]:
-                    closed_symbols.add(symbol)
-            elif latest_event.kind == "NEGATIVE_CROSS":
-                summary_lines.append(format_summary_line(symbol, result, "Negatif Kesişim"))
-            else:
-                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
+            summary_lines.append(format_summary_line(symbol, result, durum))
         except Exception as exc:
             log_error(f"{symbol} icin hata: {exc}")
-            summary_lines.append(format_error_summary_line(symbol))
 
     state["closed_symbols"] = sorted(closed_symbols)
-    if config.get("send_scan_summary", True):
+    # Sadece başlık satırlarının ötesinde gerçek sinyal varsa gönder
+    signal_lines = [l for l in summary_lines if l not in summary_lines[:3]]
+    has_signals = len(summary_lines) > 3
+    if config.get("send_scan_summary", True) and has_signals:
         summary_message = "\n".join(summary_lines)
         try:
             send_telegram_message(bot_token, chat_id, summary_message)
