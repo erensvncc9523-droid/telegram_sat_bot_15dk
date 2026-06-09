@@ -468,14 +468,24 @@ def format_signal_summary_line(symbol: str, event_name: str, event: Event, resul
 
 
 
-def format_negative_cross_message(symbol: str) -> str:
-    return "\n".join(
-        [
-            "⚠️ Negatif kesişim gerçekleşti",
-            "",
-            f"📌 {symbol}",
-        ]
-    )
+def format_negative_cross_message(symbol: str, event: Event | None = None, result: StrategyResult | None = None) -> str:
+    lines = [
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+        "⚠️  NEGATİF KESİŞİM",
+        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+        f"📌 Hisse : {symbol}",
+    ]
+    if event is not None:
+        lines.append(f"💰 Sinyal Fiyatı : {event.price:.2f} TL")
+        lines.append(f"🕒 Sinyal Zamanı : {event.timestamp.strftime('%Y-%m-%d %H:%M')}")
+    if result is not None:
+        if result.last_price is not None:
+            sign = "+" if (result.change_pct or 0) >= 0 else ""
+            pct_str = f" ({sign}{result.change_pct:.2f}%)" if result.change_pct is not None else ""
+            lines.append(f"📊 Son Fiyat     : {result.last_price:.2f} TL{pct_str}")
+        lines.append(f"🗄  Veri Kaynağı  : {result.data_source or 'yok'}")
+    lines.append("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+    return "\n".join(lines)
 
 
 def format_error_summary_line(symbol: str) -> str:
@@ -558,7 +568,7 @@ def scan_once(config: dict, state: dict) -> int:
             sent_events[event_key] = scan_time
             if can_send_separate_signal:
                 if latest_event.kind == "NEGATIVE_CROSS":
-                    message = format_negative_cross_message(symbol)
+                    message = format_negative_cross_message(symbol, latest_event, result)
                 else:
                     message = format_signal_message(symbol, event_name, latest_event, result)
 
@@ -572,7 +582,7 @@ def scan_once(config: dict, state: dict) -> int:
                 if latest_event.reason in ["STOP SAT", "KAR STOP"]:
                     closed_symbols.add(symbol)
             elif latest_event.kind == "NEGATIVE_CROSS":
-                summary_lines.append(format_negative_cross_message(symbol))
+                summary_lines.append(format_negative_cross_message(symbol, latest_event, result))
             else:
                 summary_lines.append(no_signal_text(symbol, result))
         except Exception as exc:
