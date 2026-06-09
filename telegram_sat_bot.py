@@ -469,23 +469,24 @@ def format_signal_summary_line(symbol: str, event_name: str, event: Event, resul
 
 
 def format_negative_cross_message(symbol: str, event: Event | None = None, result: StrategyResult | None = None) -> str:
-    lines = [
-        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
-        "⚠️  NEGATİF KESİŞİM",
-        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
-        f"📌 Hisse : {symbol}",
-    ]
-    if event is not None:
-        lines.append(f"💰 Sinyal Fiyatı : {event.price:.2f} TL")
-        lines.append(f"🕒 Sinyal Zamanı : {event.timestamp.strftime('%Y-%m-%d %H:%M')}")
-    if result is not None:
-        if result.last_price is not None:
-            sign = "+" if (result.change_pct or 0) >= 0 else ""
-            pct_str = f" ({sign}{result.change_pct:.2f}%)" if result.change_pct is not None else ""
-            lines.append(f"📊 Son Fiyat     : {result.last_price:.2f} TL{pct_str}")
-        lines.append(f"🗄  Veri Kaynağı  : {result.data_source or 'yok'}")
-    lines.append("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            "⚠️ NEGATİF KESİŞİM",
+            f"📌 {symbol}",
+        ]
+    )
+
+
+def format_summary_line(symbol: str, result: StrategyResult, durum: str) -> str:
+    return "\n".join(
+        [
+            "--------------------",
+            f"📌 Hisse: {symbol}",
+            f"⚪ Durum: {durum}",
+            f"💰 {price_change_text(result)}",
+            f"Veri: {result.data_source or 'yok'}",
+        ]
+    )
 
 
 def format_error_summary_line(symbol: str) -> str:
@@ -537,7 +538,7 @@ def scan_once(config: dict, state: dict) -> int:
             events = result.events
             if not events:
                 log_info(f"{symbol}: olay bulunamadi")
-                summary_lines.append(no_signal_text(symbol, result))
+                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
                 continue
             latest_event = events[-1]
             event_name = latest_event.reason if latest_event.kind == "SELL" and latest_event.reason else latest_event.kind
@@ -545,15 +546,20 @@ def scan_once(config: dict, state: dict) -> int:
             event_key = f"{symbol}|{event_name}|{latest_event.timestamp.isoformat()}"
             if event_key in sent_events:
                 log_info(f"{symbol}: bu olay daha once gonderilmis")
-                summary_lines.append(no_signal_text(symbol, result))
+                if latest_event.kind == "NEGATIVE_CROSS":
+                    summary_lines.append(format_summary_line(symbol, result, "Negatif Kesişim"))
+                elif latest_event.kind == "SELL":
+                    summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
+                else:
+                    summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
                 continue
             if latest_event.kind == "BUY" and not config["send_buy_messages"]:
                 log_info(f"{symbol}: son olay BUY, BUY mesajlari kapali")
-                summary_lines.append(no_signal_text(symbol, result))
+                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
                 continue
             if latest_event.kind == "SELL" and not config["send_sell_messages"]:
                 log_info(f"{symbol}: son olay SELL, SELL mesajlari kapali")
-                summary_lines.append(no_signal_text(symbol, result))
+                summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
                 continue
 
             can_send_separate_signal = config.get("send_signal_message_separately", False)
@@ -577,14 +583,14 @@ def scan_once(config: dict, state: dict) -> int:
                 log_info(f"Mesaj gonderildi: {symbol} {event_name} {latest_event.timestamp}")
 
             if latest_event.kind == "SELL":
-                summary_lines.append(format_signal_summary_line(symbol, event_name, latest_event, result))
+                summary_lines.append(format_summary_line(symbol, result, latest_event.reason or "SAT"))
 
                 if latest_event.reason in ["STOP SAT", "KAR STOP"]:
                     closed_symbols.add(symbol)
             elif latest_event.kind == "NEGATIVE_CROSS":
-                summary_lines.append(format_negative_cross_message(symbol, latest_event, result))
+                summary_lines.append(format_summary_line(symbol, result, "Negatif Kesişim"))
             else:
-                summary_lines.append(no_signal_text(symbol, result))
+                summary_lines.append(format_summary_line(symbol, result, "Sinyal yok"))
         except Exception as exc:
             log_error(f"{symbol} icin hata: {exc}")
             summary_lines.append(format_error_summary_line(symbol))
