@@ -3,6 +3,10 @@ name: Delete Action Cache
 on:
   workflow_dispatch:
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   delete-cache:
     runs-on: ubuntu-latest
